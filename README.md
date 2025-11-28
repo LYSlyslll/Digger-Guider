@@ -1,88 +1,75 @@
-## Digger-Guider: High-frequency Factor Extraction on Stock Trend Prediction
+## Digger-Guider: Daily-Frequency Stock Trend Prediction
 
-0. ### **Dependencies**
+This repository now focuses solely on daily-bar features (one feature vector per trading day). All high-frequency resampling and dual-branch high/low-frequency modeling have been removed. The pipeline loads daily factors, trains the daily models, and runs backtesting with the updated scripts.
 
-   Install packages from `requirements.txt`.  
+### 0. Dependencies
 
+Install Python packages from `requirements.txt`.
 
-1. ### **Load Data using qlib**
-	```linux
-	$ cd ./load_data
-	```
+```bash
+pip install -r requirements.txt
+```
 
-	#### Download daily data:
+### 1. Prepare Daily Data (via qlib)
 
-	```python
-	$ python load_dataset.py
-	```
-	* Change parameter `market` to get data from different dataset: `csi300`, `NASDAQ` etc.
+All training relies on the daily dataset (e.g., `day_csi300`). Intraday resampling is no longer needed.
 
-	  ##### Data Sample - SH600000 in CSI300
+```bash
+cd load_data
+python load_dataset.py
+```
 
-	  ![](https://ftp.bmp.ovh/imgs/2021/02/28e2e1b545cf8ffc.png)
-	
-	  features dimensions = 6 * 20 + 1 = 121
+* Adjust `market` inside `load_dataset.py` to switch datasets (e.g., `csi300`, `NASDAQ`).
+* The default daily feature window is 20 trading days with 6 base factors (OPEN, CLOSE, HIGH, LOW, VOLUME, VWAP), producing `6 * 20 + 1` columns including the label.
 
-	#### Download high-frequency data:
-	
-	```python
-	$ python high_freq_resample.py
-	```
-	
-	* Change parameter `N` to get data from different frequencies: `15min`, `30min`, `120min` etc.
-	
-	  ##### Data Sample - SH600000 in CSI300
-	
-        ![](https://ftp.bmp.ovh/imgs/2021/02/21213511c92c4c44.png)
-	
-	  features dimensions = 16 * 6 * 20 + 1 = 1921
+> **Note:** `high_freq_resample.py` has been disabled in the codebase; running it is no longer required for training.
 
-2. ### **Framework**
-* Digger：`./framework/models/cnn_rnn_v2.py`
-    * Min_Model( ) + Day_Model_2( )
-* Rule-based Guider (RG): `./framework/models/cnn_rnn_v2.py`
-    * Day_Model_1( )
-* Parametric Guider (PG): `./framework/models/cnn_rnn_v2.py`
-    * Mix_Model( ) + Day_Model_2( )
-* Mutual Distillation: `./framework/models/main_cnn_rnn_v2.py`
-    * Guider -> Digger: Mix_to_Min( ) 
-    * Digger -> Guider: Min_to_Mix( )
-3. ### **Run**
-  ```linux
-  $ cd ./framework
-  ```
+### 2. Framework Overview
 
-  #### Train `Digger-Guider` model:
+All models live in `./framework/models/cnn_rnn_v2.py` and now consume only daily sequences:
 
-  ```python
-  $ python main_cnn_rnn_v2.py with config/main_model.json model_name=cnn_rnn_v2
-  ```
+* **Day_Model_1**: RNN over the daily feature window to produce latent representations and preliminary predictions.
+* **Day_Model_2**: RNN that refines predictions by combining Day_Model_1 hidden states with raw daily inputs.
 
-  * Add `hyper-param` = {`values`} after `with` or change them in `config/main_model.json`
-  * Prediction results of each model are saved as `pred_{model_name}.pkl` in `./out/`.
+Mutual-distillation components and mixed-frequency branches have been removed; training is a single daily-only pipeline.
 
-  #### Run `Market Trading Simulation`:
-  * Prerequisites:   
-  	* Server with qlib
-  	* Prediction results 
-  ```linux
-  $ cd ./framework
-  ```
-  ```python
-  $ python trade_sim.py
-  ```
-4. ### **Records**
-	Records for each experiment are saved in `./framework/my_runs/`.  
-	Each record file includes: 
-	> config.json
-	* contains the parameter settings and data path.
+### 3. Train
 
-	> cout.txt
-	* contains the name of dataset, detailed model output, and experiment results.
+```bash
+cd framework
+python main_cnn_rnn_v2.py with config/main_model.json model_name=cnn_rnn_v2
+```
 
-	> pred_{model_name}_{seed}.pkl
-   * contains the  `score` (model prediction) and `label`
-	
-	> run.json
-	
-	* contains the hash ids of every script used in the experiment. And the source code can be found in `./framework/my_runs/source/`.
+Key runtime knobs (editable via CLI overrides or `config/main_model.json`):
+
+* **Data window**: `daily_loader_v3.pre_n_day` (default 20)
+* **Input shape**: `cnn_rnn_v2.input_shape` (default `[6, 20]` → 6 factors over 20 days)
+* **Training splits**: date ranges in `daily_loader_v3`
+* **Optimization**: learning rates in `cnn_rnn_v2.optim_args` / `optim_args_2`
+
+Model checkpoints and predictions are written to `./framework/out/` (path configurable via `output_path`).
+
+### 4. Market Trading Simulation
+
+Prerequisites:
+
+* qlib server with the corresponding market data
+* Prediction results generated from the training step
+
+Run the simulator:
+
+```bash
+cd framework
+python trade_sim.py
+```
+
+### 5. Experiment Records
+
+Each experiment creates a record under `./framework/my_runs/` containing:
+
+* `config.json`: parameter settings and data paths
+* `cout.txt`: detailed model output and results
+* `pred_{model_name}_{seed}.pkl`: serialized predictions (`score`) and labels
+* `run.json`: script hashes; source snapshots stored under `./framework/my_runs/source/`
+
+Use these artifacts to reproduce or audit runs after the daily-only refactor.
